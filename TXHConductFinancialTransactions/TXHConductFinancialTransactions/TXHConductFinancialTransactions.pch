@@ -20,6 +20,10 @@
 #include "WToast.h"
 #import "UIViewController+NavigationBarStyle.h"
 
+//支付
+#import "LLPayUtil.h"
+#import "LLPaySdk.h"
+
 //加密key
 #define VERSION 2
 
@@ -29,7 +33,6 @@
 #define API_Item  @"http://s.aiben123.com/item/item.html"
 
 //17090872779 147258
-
 #define api_domain @"http://app.aiben123.com/"
 //登录
 #define API_Login @"nblc/api/account/login"
@@ -49,12 +52,23 @@
 #define API_DealDetail @"nblc/api/deal/logs"
 //收益记录
 #define API_EarnDetail @"nblc/api/income/logs"
+//投资
+#define API_Investment @"nblc/api/deal/invest"
+//提现前
+#define API_CashPre @"nblc/api/deal/cashPre"
+//提现申请
+#define API_CashApplay @"nblc/api/deal/cashApply"
+//充值前
+#define API_PayPre     @"nblc/api/pay/ll/payPre"
 
 //公告列表
 #define API_List      @"nblc/api/notice/list"
 
 //理财项目列表
 #define  API_product   @"nblc/api/product/list"
+
+#define kkValidChar   @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+#define kkNumber @"0123456789"
 
 #define BackColor TomColor(0xefeff4)
 

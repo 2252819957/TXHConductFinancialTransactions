@@ -104,9 +104,15 @@
         DealDetailModel *model = self.dataSource[indexPath.row / 2];
         
         if (1 == [model.type intValue]) {
-            cell.titleLabel.text = @"投资";
-        }else{
             cell.titleLabel.text = @"充值";
+        }else if (2 == [model.type intValue]) {
+            cell.titleLabel.text = @"投资";
+        }else if (3 == [model.type intValue]) {
+            cell.titleLabel.text = @"提现申请";
+        }else if (4 == [model.type intValue]) {
+            cell.titleLabel.text = @"提现成功";
+        }else if (5 == [model.type intValue]) {
+            cell.titleLabel.text = @"提现失败";
         }
         
         
