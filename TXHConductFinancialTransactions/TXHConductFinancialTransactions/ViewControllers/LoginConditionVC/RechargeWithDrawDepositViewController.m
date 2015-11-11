@@ -15,14 +15,18 @@
 #import "CashPreAPICmd.h"
 #import "CashApplayAPICmd.h"
 #import "PayPreAPICmd.h"
+#import "PayPreModel.h"
+#import "ConfigModel.h"
+#import "PayBankCardAPICmd.h"
+#import "FailedLogAPICmd.h"
 
-static NSString *kLLOidPartner = @"201510201000546503";   // 商户号
-static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
+static NSString *kLLOidPartner = @"201408071000001543";                // 商户号
+static NSString *kLLPartnerKey = @"201408071000001543test_20140812";   // 密钥
 
 @interface RechargeWithDrawDepositViewController () <UITextFieldDelegate,UITableViewDataSource,UITableViewDelegate,APICmdApiCallBackDelegate,LLPaySdkDelegate>
 
 @property (nonatomic, strong) UIView *bgView;
-@property (nonatomic, strong) UITextField *inputMoneyTF;
+
 
 @property (nonatomic, strong) UITableView *RechargeView;
 
@@ -43,8 +47,25 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
 
 @property (nonatomic, strong) NSDictionary *dataDict;
 //是否是第一次充值
-
 @property (nonatomic, assign) BOOL isFirstPay;
+
+@property (nonatomic, strong) ConfigModel *configModel;
+@property (nonatomic, strong) PayPreModel *payPreModel;
+
+//bankNumberTextFiled
+@property (nonatomic, strong) UITextField *bankNumberTextFiled;
+//cardNumberTextField
+@property (nonatomic, strong) UITextField *cardNumberTextField;
+//realNameTextField
+@property (nonatomic, strong) UITextField *realNameTextField;
+
+//金额
+@property (nonatomic, strong) UITextField *inputMoneyTF;
+
+//用户第一次支付并且成功发送银行卡信息
+@property (nonatomic, strong) PayBankCardAPICmd *payBankCardAPICmd;
+//充值失败日志记录
+@property (nonatomic, strong) FailedLogAPICmd *failedLogAPICmd;
 
 @end
 
@@ -91,7 +112,7 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
             //如果没有银行卡
             
             self.nameArr=@[@"账户余额(元)：",@"银行卡：",@"身份证：",@"真实姓名：",@"提现金额(元)："];
-            self.textArr = @[@"",@"",@"输入您的身份证",@"输入您的真实姓名",@"输入提现金额"];
+            self.textArr = @[@"",@"请输入银行卡号",@"输入您的身份证",@"输入您的真实姓名",@"输入提现金额"];
             
             return 7;
         }else{
@@ -222,6 +243,18 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
         }
     }
     
+    BOOL isFirstCharge = NO;
+    
+    if (!self.isDeposite) {
+        
+        if (self.isFirstPay) {
+            
+            isFirstCharge = YES;
+            
+        }
+        
+    }
+    
     if (indexPath.row != 0 && indexPath.row != 1) {
         
         cell.textField.placeholder = self.textArr[indexPath.row];
@@ -230,27 +263,41 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
         
     }else{
         
-        cell.textField.hidden = YES;
-        
-        UILabel *tempLabel = (UILabel *)[cell.contentView viewWithTag:indexPath.row + 11];
-        
-        NSString *priceStr = [[NSString stringWithFormat:@"%@",self.userInfoModel.income?self.userInfoModel.income:@""] changeYFormatWithMoneyAmount];
-        
-        
-        if (0 == indexPath.row) {
+        if (1 == indexPath.row && !self.isDeposite && self.isFirstPay) {
             
-            tempLabel.text = priceStr;
-            tempLabel.textColor=[UIColor redColor];
+            cell.textField.placeholder = self.textArr[indexPath.row];
+            cell.textField.hidden = NO;
             
         }else{
             
-            tempLabel.text = [NSString stringWithFormat:@"%@",self.userInfoModel.bankCardNum?self.userInfoModel.bankCardNum:@""];
-            tempLabel.textColor=[UIColor grayColor];
+            cell.textField.hidden = YES;
             
+            UILabel *tempLabel = (UILabel *)[cell.contentView viewWithTag:indexPath.row + 11];
+            
+            NSString *priceStr = [[NSString stringWithFormat:@"%@",self.userInfoModel.income?self.userInfoModel.income:@""] changeYFormatWithMoneyAmount];
+            
+            
+            if (0 == indexPath.row) {
+                
+                tempLabel.text = priceStr;
+                tempLabel.textColor=[UIColor redColor];
+                
+            }else{
+                
+                tempLabel.text = [NSString stringWithFormat:@"%@",self.userInfoModel.bankCardNum?self.userInfoModel.bankCardNum:@""];
+                tempLabel.textColor=[UIColor grayColor];
+                
+            }
+
         }
         
     }
     
+    if (!self.isDeposite && ((4 == indexPath.row && self.isFirstPay) || (2 == indexPath.row && !self.isFirstPay))) {
+        
+        self.inputMoneyTF.keyboardType = UIKeyboardTypeDecimalPad;
+        
+    }
     cell.leftLable.text=self.nameArr[indexPath.row];
     cell.textField.tag=indexPath.row;
     cell.textField.delegate = self;
@@ -265,6 +312,8 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
 #pragma mark - APICmdApiCallBackDelegate
 
 - (void)apiCmdDidSuccess:(RYBaseAPICmd *)baseAPICmd responseData:(id)responseData {
+    
+    [self.view endEditing:YES];
     
     NSDictionary *tempDict = (NSDictionary *)responseData;
     
@@ -304,12 +353,36 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
             
             self.dataDict = [[NSDictionary alloc] initWithDictionary:tempDict[@"data"]];
             
+            self.userInfoModel = [[UserInfoModel alloc] init];
+            self.userInfoModel.bankCardNum = self.dataDict[@"bankCardNum"];
+            self.userInfoModel.income = self.dataDict[@"remainAsset"];
+            
             self.isFirstPay = [self.dataDict[@"isFirstPay"] boolValue];
+            
+            self.configModel = [[ConfigModel alloc] init];
+            [self.configModel setValuesForKeysWithDictionary:self.dataDict[@"config_ll"]];
+            
+            self.payPreModel = [[PayPreModel alloc] init];
+            [self.payPreModel setValuesForKeysWithDictionary:self.dataDict];
             
             [self.RechargeView reloadData];
             
         }
         
+    }else if (baseAPICmd == self.payBankCardAPICmd) {
+        
+        
+        NSLog(@"***************");
+        
+        if ([tempDict[@"result"] intValue] != LoginTypeSuccess) {
+            
+            [Tool ToastNotification:tempDict[@"msg"]];
+            
+        }else{
+            
+            [Tool ToastNotification:@"发送用户数据成功"];
+            
+        }
     }
     
 }
@@ -322,7 +395,7 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
 #pragma mark UITextFieldDelegate
 
 -(BOOL)textFieldShouldReturn:(UITextField *)textField{
-    
+
     if (textField.tag==1||textField.tag==2||textField.tag==3||textField.tag==4) {
         [textField resignFirstResponder];
     }
@@ -332,6 +405,21 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
 
 - (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string
 {
+    if (self.isFirstPay) {
+        
+        self.bankNumberTextFiled = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]].contentView viewWithTag:1];
+        self.cardNumberTextField = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]].contentView viewWithTag:2];
+        self.realNameTextField = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:3 inSection:0]].contentView viewWithTag:3];
+        self.inputMoneyTF = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:4 inSection:0]].contentView viewWithTag:4];
+        
+        
+        if (textField == self.realNameTextField || textField == self.cardNumberTextField || textField == self.bankNumberTextFiled) {
+            return YES;
+        }
+        
+    }
+    
+    
     //invertedSet方法是去反字符,把所有的除了kNumber里的字符都找出来(包含去空格功能)
     NSCharacterSet *cs = [[NSCharacterSet characterSetWithCharactersInString:kkNumber] invertedSet];
     //按cs分离出数组,数组按@""分离出字符串
@@ -346,6 +434,9 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
 // TODO: 开发人员需要根据实际业务调整逻辑
 - (void)paymentEnd:(LLPayResult)resultCode withResultDic:(NSDictionary *)dic
 {
+    
+    NSLog(@"dic = %@",dic);
+    
     NSString *msg = @"支付异常";
     switch (resultCode) {
         case kLLPayResultSuccess:
@@ -358,6 +449,12 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
                 //
                 //NSString *payBackAgreeNo = dic[@"agreementno"];
                 // TODO: 协议号
+                
+                
+                //用户第一次支付并且成功发送银行卡信息
+                self.payBankCardAPICmd.reformParams = @{@"id":[Tool getUserInfo][@"id"],@"bankCardNum":self.bankNumberTextFiled.text};
+                [self.payBankCardAPICmd loadData];
+                
             }
             else if ([result_pay isEqualToString:@"PROCESSING"])
             {
@@ -373,34 +470,24 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
             }
         }
             break;
-        case kLLPayResultFail:
-        {
+        case kLLPayResultFail:{
             msg = @"支付失败";
         }
             break;
-        case kLLPayResultCancel:
-        {
+        case kLLPayResultCancel:{
             msg = @"支付取消";
         }
             break;
         case kLLPayResultInitError:
-        {
-            msg = @"sdk初始化异常";
-        }
             break;
         case kLLPayResultInitParamError:
-        {
-            msg = dic[@"ret_msg"];
-        }
             break;
         default:
             break;
     }
     
-    NSString *showMsg = [msg stringByAppendingString:[LLPayUtil jsonStringOfObj:dic]];
-    
     [[[UIAlertView alloc] initWithTitle:@"结果"
-                                message:showMsg
+                                message:msg
                                delegate:nil
                       cancelButtonTitle:@"确认"
                       otherButtonTitles:nil] show];
@@ -410,26 +497,11 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
 #pragma mark - 订单支付
 - (void)pay {
     
-    NSMutableDictionary *dict = [[NSMutableDictionary alloc] initWithDictionary:self.dataDict[@"config_ll"]];
-    
-    if (self.isFirstPay) {
-        
-        //如果是第一次支付
-        
-        [dict addEntriesFromDictionary:@{
-                                          @"id_no":self.dataDict[@"idCard"],
-                                          //证件号码 id_no 否 String
-                                          @"acct_name":self.dataDict[@"realName"],
-                                          //银行账号姓名 acct_name 否 String
-                                          }];
-        
-    }
     
     LLPayUtil *payUtil = [[LLPayUtil alloc] init];
     
-    
     // 进行签名
-    NSDictionary *signedOrder = [payUtil signedOrderDic:dict
+    NSDictionary *signedOrder = [payUtil signedOrderDic:[self payDataDeal]
                                              andSignKey:kLLPartnerKey];
     
     
@@ -445,6 +517,66 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
     
     // 预授权
     //[self.sdk presentPreAuthPaySdkInViewController:self withTraderInfo:signedOrder];
+    
+}
+
+- (NSDictionary *)payDataDeal {
+    
+    NSDateFormatter *dateFormater = [[NSDateFormatter alloc] init];
+    [dateFormater setDateFormat:@"yyyyMMddHHmmss"];
+    NSString *simOrder = [dateFormater stringFromDate:[NSDate date]];
+    
+    
+    NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
+    
+    [dict setValue:self.configModel.busi_partner forKey:@"busi_partner"];
+    [dict setValue:self.payPreModel.orderNum forKey:@"no_order"];
+    [dict setValue:@"投小猴 充值" forKey:@"name_goods"];
+    [dict setValue:simOrder forKey:@"dt_order"];
+    [dict setValue:simOrder forKey:@"info_order"];
+    
+    //正式环境
+    [dict setValue:self.configModel.notify_url forKey:@"notify_url"];
+    //测试环境
+    //[dict setValue:@"http://app.aiben123.com/api/pay/ll/payResult" forKey:@"notify_url"];
+    
+    [dict setValue:self.configModel.sign_type forKey:@"sign_type"];
+    [dict setValue:self.configModel.valid_order forKey:@"valid_order"];
+    [dict setValue:[NSString stringWithFormat:@"%@",[Tool getUserInfo][@"id"]] forKey:@"user_id"];
+    [dict setValue:self.inputMoneyTF.text forKey:@"money_order"];
+    
+    //风险控制参数
+    NSDictionary *ristDict = [NSDictionary dictionaryWithObjectsAndKeys:@"13958069593",@"user_info_bind_phone",
+                              @"201407251110120",@"user_info_dt_register",@"4.0",@"frms_ware_category",@"1122111221",@"request_imei",nil];
+    [dict setValue: [LLPayUtil jsonStringOfObj:ristDict] forKey:@"risk_item"];
+    
+    [dict setValue:kLLOidPartner forKey:@"oid_partner"];
+    
+    if (!self.isFirstPay) {
+        
+        //如果是第一次支付
+        [dict addEntriesFromDictionary:@{
+                                         @"id_no":self.payPreModel.idCard,
+                                         //证件号码 id_no 否 String
+                                         @"acct_name":self.payPreModel.realName,
+                                         //银行账号姓名 acct_name 否 String
+                                         @"no_agree":self.payPreModel.signNum
+                                         }];
+        
+    }else{
+        
+        [dict addEntriesFromDictionary:@{
+                                         @"id_no":self.cardNumberTextField.text,
+                                         //证件号码 id_no 否 String
+                                         @"acct_name":self.realNameTextField.text,
+                                         //银行账号姓名 acct_name 否 String
+                                         @"card_no":self.bankNumberTextFiled.text
+                                         // 银行卡号 卡前置，卡首次支付的时候传入，卡历次支付传入对应协议号就可以
+                                         }];
+        
+    }
+    
+    return dict;
     
 }
 
@@ -478,6 +610,40 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
         }
         
     }else{
+        
+        if (self.isFirstPay) {
+            
+            self.bankNumberTextFiled = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]].contentView viewWithTag:1];
+            self.cardNumberTextField = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]].contentView viewWithTag:2];
+            self.realNameTextField = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:3 inSection:0]].contentView viewWithTag:3];
+            self.inputMoneyTF = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:4 inSection:0]].contentView viewWithTag:4];
+            
+            NSLog(@"%@ --- %@",self.realNameTextField.text, self.inputMoneyTF.text);
+            
+            if (![self isRightNumberAlpha:self.bankNumberTextFiled.text]) {
+                
+                UIAlertView *alertView = [[UIAlertView alloc]initWithTitle:nil message:@"银行卡格式不正确" delegate:self cancelButtonTitle:@"我知道了" otherButtonTitles:nil, nil];
+                [alertView show];
+                
+            }else if (![self isRightNumberAlpha:self.cardNumberTextField.text]) {
+                
+                UIAlertView *alertView = [[UIAlertView alloc]initWithTitle:nil message:@"身份证格式不正确" delegate:self cancelButtonTitle:@"我知道了" otherButtonTitles:nil, nil];
+                [alertView show];
+                
+            }else{
+                
+                
+                
+                [self pay];
+                
+            }
+        }else {
+            
+            self.inputMoneyTF = (UITextField *)[[self.RechargeView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]].contentView viewWithTag:2];
+            
+            [self pay];
+            
+        }
         
         
         
@@ -549,6 +715,14 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
         [contentView addSubview:onelable];
     }
     
+}
+
+- (BOOL)isRightNumberAlpha:(NSString *)str
+{
+    NSString * regex = @"^[A-Za-z0-9]+$";
+    NSPredicate *pred = [NSPredicate predicateWithFormat:@"SELF MATCHES %@", regex];
+    BOOL isMatch = [pred evaluateWithObject:str];
+    return isMatch;
 }
 
 #pragma mark - getters and setters
@@ -627,6 +801,26 @@ static NSString *kLLPartnerKey = @"ihzb1l7xgv20151020";   // 密钥
     }
     _payPreAPICmd.reformParams = @{@"id":[Tool getUserInfo][@"id"]};
     return _payPreAPICmd;
+}
+
+- (PayBankCardAPICmd *)payBankCardAPICmd {
+    if (!_payBankCardAPICmd) {
+        
+        _payBankCardAPICmd = [[PayBankCardAPICmd alloc] init];
+        _payBankCardAPICmd.delegate = self;
+        _payBankCardAPICmd.path = API_PaySuceess;
+        
+    }
+    return _payBankCardAPICmd;
+}
+
+- (FailedLogAPICmd *)failedLogAPICmd {
+    if (!_failedLogAPICmd) {
+        _failedLogAPICmd = [[FailedLogAPICmd alloc] init];
+        _failedLogAPICmd.delegate = self;
+        _failedLogAPICmd.path = API_FailedLog;
+    }
+    return _failedLogAPICmd;
 }
 
 
